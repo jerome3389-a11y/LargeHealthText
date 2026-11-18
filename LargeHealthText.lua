@@ -1,10 +1,11 @@
--- LargeHealthText 2.9 - single function: target frame health/mana only.
--- Faithful copy of ShaguTweaks Real Health Numbers. 2.8 deviated: it
--- checked "if not TextString" before assigning, but ShaguTweaks assigns
--- UNCONDITIONALLY (overwrites whatever is there). 2.9 removes that check.
--- Idempotence is by "if TargetFrame.StatusTexts then return end", not by
--- checking TextString. Setup, hook, lockShow, values (MobInfo2 memory),
--- format "cur/max" otherwise match ShaguTweaks.
+-- LargeHealthText 2.10 - single function: target frame health/mana only.
+-- Faithful copy of ShaguTweaks Real Health Numbers. 2.9 omitted the TBC
+-- hide line; 2.10 adds it back (with vanilla = true, so it is skipped in
+-- vanilla exactly like ShaguTweaks). Otherwise identical to ShaguTweaks
+-- except the three intended changes: target bars only (no player/pet),
+-- values from MobInfo2 memory (not libhealth), format always "cur/max".
+
+local vanilla = true
 
 local function LHT_Setup()
 	if not TargetFrame or not TargetFrameHealthBar or not TargetFrameManaBar then return end
@@ -33,6 +34,10 @@ local function LHT_InstallHook()
 		HookTextStatusBar_UpdateTextString(sb)
 		local string = sb.TextString
 		if string and sb.unit then
+			-- hide tbc text string element (ShaguTweaks verbatim; skipped in vanilla)
+			if not vanilla then
+				TargetFrameHealthBarText:Hide()
+			end
 			sb.lockShow = 42
 			sb:Show()
 			local min, max = sb:GetMinMaxValues()

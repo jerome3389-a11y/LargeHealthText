@@ -1,17 +1,18 @@
--- LargeHealthText 2.1 - single function: target frame health/mana only.
+-- LargeHealthText 2.2 - single function: target frame health/mana only.
 -- Turtle WoW: TargetFrameHealthBar.TextString is NIL even with a target
--- selected (confirmed by /run diagnostic 2026-11-18 22:09), so 2.0's
--- "if string then set it" did nothing. 2.1 creates its own FontString
--- and assigns it to bar.TextString when nil (ShaguTweaks approach),
--- then writes "cur/max" on it. No large text, no player/pet, no toggle.
--- Values: MobInfo2 learned real health first, then Nampower, then bar.
+-- (confirmed by /run diagnostic 2026-11-18 22:09). 2.1 creates its own
+-- FontString and assigns it when nil. 2.2 fixes two things the user
+-- reported on 2.1 (screenshot 22:16):
+-- (a) values: at full health the bar reads 100 (percent); MobInfo2's PPP
+--     memory/estimate is wrong there, so do NOT use MobInfo2. Nampower
+--     GetUnitField reads the game's memory directly (real cur/max),
+--     tried FIRST; bar values only as fallback.
+-- (b) Blizzard's own "82%" / "82" still shows and overlaps: hide every
+--     other FontString parented to the target bars, keeping only ours.
+-- No large text, no player/pet, no toggle.
 
 local function LHT_GetTargetHealth()
-	if type(MobHealth_GetTargetCurHP) == "function" and type(MobHealth_GetTargetMaxHP) == "function" then
-		local cur = MobHealth_GetTargetCurHP()
-		local max = MobHealth_GetTargetMaxHP()
-		if cur and max and max > 0 then return cur, max end
-	end
+	-- Nampower direct memory read (real values, accurate at full health)
 	if type(GetUnitField) == "function" then
 		local ok, cur = pcall(GetUnitField, "target", "health")
 		local ok2, max = pcall(GetUnitField, "target", "maxHealth")
@@ -55,6 +56,18 @@ local function LHT_EnsureStrings()
 	end
 end
 
+-- hide every other FontString parented to a bar (Blizzard's own text)
+local function LHT_HideOtherStrings(bar, keep)
+	if not bar or not bar.GetRegions then return end
+	local regions = { bar:GetRegions() }
+	for _, r in ipairs(regions) do
+		if r and r ~= keep and r.GetObjectType and r:GetObjectType() == "FontString" then
+			r:SetText("")
+			r:Hide()
+		end
+	end
+end
+
 local LHT_Hooked = false
 local function LHT_InstallHook()
 	if LHT_Hooked then return end
@@ -65,10 +78,10 @@ local function LHT_InstallHook()
 		OrigUpdate(sb)
 		LHT_EnsureStrings()
 		if sb == TargetFrameHealthBar and LHT_HealthText then
-			-- TextString is nil in Turtle WoW: assign ours
 			if sb.TextString ~= LHT_HealthText then
 				sb.TextString = LHT_HealthText
 			end
+			LHT_HideOtherStrings(sb, LHT_HealthText)
 			local cur, max = LHT_GetTargetHealth()
 			if max and max > 0 then
 				LHT_HealthText:SetText(cur .. "/" .. max)
@@ -81,6 +94,7 @@ local function LHT_InstallHook()
 			if sb.TextString ~= LHT_ManaText then
 				sb.TextString = LHT_ManaText
 			end
+			LHT_HideOtherStrings(sb, LHT_ManaText)
 			local cur, max = LHT_GetTargetMana()
 			if max and max > 0 then
 				LHT_ManaText:SetText(cur .. "/" .. max)

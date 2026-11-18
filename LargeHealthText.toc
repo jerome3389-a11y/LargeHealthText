@@ -2,5 +2,5 @@
 ## Title: Target Health Mana
 ## Notes: Shows the target's real health and mana as cur/max on the target frame, no overlap. Single function, target frame only.
 ## Author: roy
-## Version: 2.7
+## Version: 2.8
 LargeHealthText.lua

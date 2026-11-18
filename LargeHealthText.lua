@@ -1,4 +1,4 @@
--- LargeHealthText 1.3
+-- LargeHealthText 1.4
 -- Large health numbers on player, pet and target unit frames.
 -- Extracted from ShaguTweaks "Real Health Numbers" (shagu/ShaguTweaks),
 -- standalone, no dependencies. Turtle WoW 1.18.1 / WoW 1.12.
@@ -6,13 +6,15 @@
 -- 1.1: optional Nampower support (GetUnitField direct reads, bar fallback).
 -- 1.2: pcall GetUnitField; delayed re-apply on target change / entering
 -- world; assertive Replace.
--- 1.3: FIX - the font must be set on this addon's OWN font strings
--- (LHT_*BarText), not on the bars' TextString. 1.1/1.2 set the font on
--- frame.TextString (Blizzard's original), so the owned strings had no
--- font and every SetText raised "Font not set". Also guard the pet-bar
--- font setup against a nil TextString (target bars have none until a
--- target is selected, which aborted Setup at line 124 and left the hook
--- uninstalled).
+-- 1.3: font set on this addon's OWN strings (fix "Font not set");
+-- nil-guard pet-bar font setup.
+-- 1.4: FIX (a) turning /lht off left two health numbers: Restore put
+-- Blizzard's text back but never hid this addon's own string, so both
+-- showed. Restore now hides and clears the owned string.
+-- FIX (b) target bar never changed: the game / another addon can reset
+-- bar.TextString after Apply runs, so the hook now re-asserts ownership
+-- on every bar update (if the bar's TextString is not ours, take it
+-- back immediately), instead of relying only on event-time Apply.
 
 if not LargeHealthTextDB then LargeHealthTextDB = { enabled = true } end
 
@@ -86,6 +88,7 @@ end
 
 -- saved originals, so /lht off restores Blizzard's text
 local LHT_Orig = {}  -- [bar] = original TextString
+local LHT_OwnedByBar = {}  -- [bar] = this addon's owned font string
 local LHT_Hooked = false
 local LHT_OrigUpdate = nil
 
@@ -114,6 +117,15 @@ end
 
 local function LHT_Restore(bar)
 	local orig = LHT_Orig[bar]
+	local owned = LHT_OwnedByBar[bar]
+	-- Always hide and clear our own string first, or it keeps showing
+	-- next to the restored Blizzard text (the "two health numbers"
+	-- seen when turning /lht off).
+	if owned then
+		owned:Hide()
+		owned:SetText("")
+		LHT_LastText[owned] = nil
+	end
 	if orig and bar.TextString ~= orig and not LHT_IsOurs(bar.TextString) then
 		-- someone else owns it now, leave it alone
 		return
@@ -138,6 +150,10 @@ local function LHT_Setup()
 		LHT_PlayerHealthText:SetPoint("CENTER", PlayerFrameHealthBar, "CENTER", 0, 0)
 		LHT_PlayerManaText = playerTexts:CreateFontString("LHT_PlayerManaBarText", "OVERLAY")
 		LHT_PlayerManaText:SetPoint("CENTER", PlayerFrameManaBar, "CENTER", 0, 0)
+		LHT_OwnedByBar[TargetFrameHealthBar] = LHT_TargetHealthText
+		LHT_OwnedByBar[TargetFrameManaBar] = LHT_TargetManaText
+		LHT_OwnedByBar[PlayerFrameHealthBar] = LHT_PlayerHealthText
+		LHT_OwnedByBar[PlayerFrameManaBar] = LHT_PlayerManaText
 		-- Font goes on THIS addon's own strings. Setting it on the bars'
 		-- TextString (Blizzard's original) leaves the owned strings
 		-- font-less and every SetText raises "Font not set".
@@ -170,6 +186,15 @@ local function LHT_Setup()
 			if not sb then sb = this end
 			LHT_OrigUpdate(sb)
 			if not LargeHealthTextDB.enabled then return end
+			-- Re-assert ownership on every update: the game or another
+			-- addon can reset bar.TextString after Apply runs, which is
+			-- what kept the target bar on Blizzard's default. If this
+			-- bar is one of ours and it is not showing our string,
+			-- take it back right now.
+			local owned = LHT_OwnedByBar[sb]
+			if owned and sb.TextString ~= owned then
+				LHT_Replace(sb, owned)
+			end
 			local string = sb.TextString
 			if string and sb.unit then
 				sb.lockShow = 42

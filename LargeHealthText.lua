@@ -1,20 +1,62 @@
--- LargeHealthText 2.11 - single function: target frame health/mana only.
--- Self-analysis of 2.10 found two bugs (user: analyze, do not test):
--- (1) Hook processes ALL bars, not just target. ShaguTweaks intends that
---     (it shows numbers on player/pet/target), but user wants target
---     ONLY. 2.10 overwrote the player bar text with "cur/max" too.
---     FIX: return early unless sb is TargetFrameHealthBar/ManaBar.
--- (2) Hook + setup installed IMMEDIATELY at file load (early), so the
---     hook is INNER, not outermost. MobInfo2 loads after us (M > L) and
---     installs its hook later, so its post-processing runs AFTER ours
---     and can overwrite our text. ShaguTweaks installs in module.enable
---     (after UI loads, late). FIX: install ONLY on PLAYER_ENTERING_WORLD
---     (late), remove immediate calls. A /reload is needed if the addon
---     is enabled mid-session.
--- Otherwise identical to ShaguTweaks except target-only, MobInfo2
--- memory values, format "cur/max".
+-- LargeHealthText 2.12 - single function: target frame health/mana only.
+-- User tested 2.11: "系统还在" - Blizzard's "82%"/"82" still shows.
+-- Root cause (from the diagnostic): in Turtle WoW, bar.TextString is NIL.
+-- So the game's own TextStatusBar_UpdateTextString does NOTHING for the
+-- target bar (it uses sb.TextString). The "82%" text is NOT set via
+-- bar.TextString - it is rendered by a FontString the game (or another
+-- addon) holds directly, parented to the bar or the frame. Replacing
+-- bar.TextString (ShaguTweaks' mechanism) cannot orphan it, because it
+-- was never assigned to bar.TextString in the first place.
+-- FIX: find and hide the actual rendering FontString(s). After creating
+-- our owned strings, enumerate the bar's and the frame's regions and
+-- hide every FontString that is not ours. Re-assert in the hook (the
+-- game may re-show it or create it on target change). Our owned strings
+-- are the only FontStrings left visible on the bar. MobInfo2's own
+-- strings are parented to its own holder frame, not to the bar, so they
+-- are not touched.
+-- Setup/hook timing stays late (PLAYER_ENTERING_WORLD, outermost).
+-- Values still MobInfo2 memory, format still "cur/max", target only.
 
 local vanilla = true
+
+local LHT_Owned = {}
+
+local function LHT_HideOthers()
+	for _, bar in pairs({ TargetFrameHealthBar, TargetFrameManaBar }) do
+		if bar then
+			local regions = { bar:GetRegions() }
+			for _, r in ipairs(regions) do
+				if r and r.IsObjectType and r:IsObjectType("FontString") and not LHT_Owned[r] then
+					r:Hide()
+					r:SetText("")
+				end
+			end
+		end
+	end
+	if TargetFrame then
+		local children = { TargetFrame:GetChildren() }
+		for _, child in ipairs(children) do
+			if child and child.IsObjectType and child:IsObjectType("FontString") and not LHT_Owned[child] then
+				-- only hide FontStrings that sit on/near the bars (not the name text)
+				local name = child:GetName()
+				if name and (string.find(name, "HealthBar") or string.find(name, "ManaBar")) then
+					child:Hide()
+					child:SetText("")
+				end
+			end
+		end
+		local regions = { TargetFrame:GetRegions() }
+		for _, r in ipairs(regions) do
+			if r and r.IsObjectType and r:IsObjectType("FontString") and not LHT_Owned[r] then
+				local name = r:GetName()
+				if name and (string.find(name, "HealthBar") or string.find(name, "ManaBar")) then
+					r:Hide()
+					r:SetText("")
+				end
+			end
+		end
+	end
+end
 
 local function LHT_Setup()
 	if not TargetFrame or not TargetFrameHealthBar or not TargetFrameManaBar then return end
@@ -29,7 +71,9 @@ local function LHT_Setup()
 		frame.TextString:SetFontObject("GameFontWhite")
 		frame.TextString:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
 		frame.TextString:SetHeight(32)
+		LHT_Owned[frame.TextString] = true
 	end
+	LHT_HideOthers()
 end
 
 local LHT_Hooked = false
@@ -40,11 +84,9 @@ local function LHT_InstallHook()
 	function TextStatusBar_UpdateTextString(sb)
 		if not sb then sb = this end
 		HookTextStatusBar_UpdateTextString(sb)
-		-- target bars ONLY (bug 1 fix: do not touch player/pet bars)
 		if sb ~= TargetFrameHealthBar and sb ~= TargetFrameManaBar then return end
 		local string = sb.TextString
 		if string and sb.unit then
-			-- hide tbc text string element (ShaguTweaks verbatim; skipped in vanilla)
 			if not vanilla then
 				TargetFrameHealthBarText:Hide()
 			end
@@ -54,7 +96,6 @@ local function LHT_InstallHook()
 			local cur = sb:GetValue()
 			local percent = max > 0 and floor(cur / max * 100) or 0
 			if sb:GetName() == "TargetFrameHealthBar" then
-				-- MobInfo2 memory (replaces libhealth): max from database
 				local mmax = nil
 				if type(MobHealth_GetTargetMaxHP) == "function" then
 					mmax = MobHealth_GetTargetMaxHP()
@@ -64,7 +105,6 @@ local function LHT_InstallHook()
 					cur = math.floor(percent * max / 100 + 0.5)
 				end
 			end
-			-- format: always "cur/max" (user wants 141/172, not "141 - 82%")
 			string:SetText(cur .. "/" .. max)
 			if max == 0 then
 				string:Hide()
@@ -78,12 +118,12 @@ local function LHT_InstallHook()
 			else
 				string:Show()
 			end
+			-- re-hide any other FontString the game re-showed (target change)
+			LHT_HideOthers()
 		end
 	end
 end
 
--- install ONLY on PLAYER_ENTERING_WORLD (late, outermost - bug 2 fix).
--- No immediate calls: installing at file load makes the hook inner.
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:SetScript("OnEvent", function()

@@ -1,14 +1,18 @@
--- LargeHealthText 1.2
+-- LargeHealthText 1.3
 -- Large health numbers on player, pet and target unit frames.
 -- Extracted from ShaguTweaks "Real Health Numbers" (shagu/ShaguTweaks),
 -- standalone, no dependencies. Turtle WoW 1.18.1 / WoW 1.12.
 -- Toggle: /lht  (on/off, saved per character account in LargeHealthTextDB)
 -- 1.1: optional Nampower support (GetUnitField direct reads, bar fallback).
--- 1.2: GetUnitField wrapped in pcall (a bad field/version must never break
--- the hook); re-apply on target change / entering world (the target bar's
--- TextString does not exist until a target is selected); delayed re-apply
--- so this addon takes the bars back after any other addon that also
--- replaces TextString (e.g. MobInfo2) runs its own handler.
+-- 1.2: pcall GetUnitField; delayed re-apply on target change / entering
+-- world; assertive Replace.
+-- 1.3: FIX - the font must be set on this addon's OWN font strings
+-- (LHT_*BarText), not on the bars' TextString. 1.1/1.2 set the font on
+-- frame.TextString (Blizzard's original), so the owned strings had no
+-- font and every SetText raised "Font not set". Also guard the pet-bar
+-- font setup against a nil TextString (target bars have none until a
+-- target is selected, which aborted Setup at line 124 and left the hook
+-- uninstalled).
 
 if not LargeHealthTextDB then LargeHealthTextDB = { enabled = true } end
 
@@ -134,19 +138,30 @@ local function LHT_Setup()
 		LHT_PlayerHealthText:SetPoint("CENTER", PlayerFrameHealthBar, "CENTER", 0, 0)
 		LHT_PlayerManaText = playerTexts:CreateFontString("LHT_PlayerManaBarText", "OVERLAY")
 		LHT_PlayerManaText:SetPoint("CENTER", PlayerFrameManaBar, "CENTER", 0, 0)
-		for _, frame in pairs({ TargetFrameHealthBar, TargetFrameManaBar, PlayerFrameHealthBar, PlayerFrameManaBar }) do
-			frame.TextString:SetFontObject("GameFontWhite")
-			frame.TextString:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
-			frame.TextString:SetHeight(32)
+		-- Font goes on THIS addon's own strings. Setting it on the bars'
+		-- TextString (Blizzard's original) leaves the owned strings
+		-- font-less and every SetText raises "Font not set".
+		for _, fontString in pairs({ LHT_TargetHealthText, LHT_TargetManaText, LHT_PlayerHealthText, LHT_PlayerManaText }) do
+			fontString:SetFontObject("GameFontWhite")
+			fontString:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
+			fontString:SetHeight(32)
 		end
+		-- Pet bars keep Blizzard's TextString; only re-font it, and only
+		-- if it exists (nil-safe: a bar with no TextString must not abort Setup).
 		for _, frame in pairs({ PetFrameHealthBar, PetFrameManaBar }) do
-			frame.TextString:SetFontObject("GameFontWhite")
-			frame.TextString:SetFont(STANDARD_TEXT_FONT, 9, "OUTLINE")
-			frame.TextString:SetHeight(32)
-			frame.TextString:SetJustifyH("LEFT")
+			if frame and frame.TextString then
+				frame.TextString:SetFontObject("GameFontWhite")
+				frame.TextString:SetFont(STANDARD_TEXT_FONT, 9, "OUTLINE")
+				frame.TextString:SetHeight(32)
+				frame.TextString:SetJustifyH("LEFT")
+			end
 		end
-		PetFrameHealthBar.TextString:SetPoint("CENTER", PetFrameHealthBar, "CENTER", -2, 0)
-		PetFrameManaBar.TextString:SetPoint("CENTER", PetFrameManaBar, "CENTER", -2, -2)
+		if PetFrameHealthBar.TextString then
+			PetFrameHealthBar.TextString:SetPoint("CENTER", PetFrameHealthBar, "CENTER", -2, 0)
+		end
+		if PetFrameManaBar.TextString then
+			PetFrameManaBar.TextString:SetPoint("CENTER", PetFrameManaBar, "CENTER", -2, -2)
+		end
 	end
 	if not LHT_Hooked then
 		LHT_Hooked = true

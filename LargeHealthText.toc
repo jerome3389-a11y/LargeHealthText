@@ -2,6 +2,6 @@
 ## Title: Large Health Text
 ## Notes: Large health numbers on player, pet and target frames. Extracted from ShaguTweaks Real Health Numbers.
 ## Author: roy
-## Version: 1.1
+## Version: 1.2
 ## SavedVariables: LargeHealthTextDB
 LargeHealthText.lua

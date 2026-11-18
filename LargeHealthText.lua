@@ -1,12 +1,14 @@
--- LargeHealthText 1.1
+-- LargeHealthText 1.2
 -- Large health numbers on player, pet and target unit frames.
 -- Extracted from ShaguTweaks "Real Health Numbers" (shagu/ShaguTweaks),
 -- standalone, no dependencies. Turtle WoW 1.18.1 / WoW 1.12.
 -- Toggle: /lht  (on/off, saved per character account in LargeHealthTextDB)
--- 1.1: optional Nampower support. If the Nampower DLL is loaded,
--- health/mana are read directly from memory via GetUnitField (fastest);
--- otherwise the bar's own values are used (Turtle WoW already sends real
--- values, so both paths agree). No DLL required; works with or without it.
+-- 1.1: optional Nampower support (GetUnitField direct reads, bar fallback).
+-- 1.2: GetUnitField wrapped in pcall (a bad field/version must never break
+-- the hook); re-apply on target change / entering world (the target bar's
+-- TextString does not exist until a target is selected); delayed re-apply
+-- so this addon takes the bars back after any other addon that also
+-- replaces TextString (e.g. MobInfo2) runs its own handler.
 
 if not LargeHealthTextDB then LargeHealthTextDB = { enabled = true } end
 
@@ -30,6 +32,14 @@ end
 -- health / maxHealth, power1..power5 / maxPower1..maxPower5.
 local LHT_UseNampower = (type(GetUnitField) == "function")
 
+-- pcall wrapper: an old Nampower that rejects a field name raises a Lua
+-- error; that must fall back to the bar, never break the hook.
+local function LHT_SafeGetField(unit, field)
+	local ok, val = pcall(GetUnitField, unit, field)
+	if ok then return val end
+	return nil
+end
+
 -- power field for a unit's current power bar (UnitPowerType: 0 mana,
 -- 1 rage, 2 focus, 3 energy, 4 happiness)
 local function LHT_PowerFields(unit)
@@ -42,17 +52,17 @@ local function LHT_PowerFields(unit)
 end
 
 -- cur/max for a status bar. Prefers Nampower direct reads; falls back to
--- the bar's own values when Nampower is absent or returns nil.
+-- the bar's own values when Nampower is absent, errors, or returns nil.
 local function LHT_GetBarValues(sb)
 	local cur, max
 	if LHT_UseNampower and sb.unit then
 		if strfind(sb:GetName(), "Health") then
-			cur = GetUnitField(sb.unit, "health")
-			max = GetUnitField(sb.unit, "maxHealth")
+			cur = LHT_SafeGetField(sb.unit, "health")
+			max = LHT_SafeGetField(sb.unit, "maxHealth")
 		else
 			local curField, maxField = LHT_PowerFields(sb.unit)
-			cur = GetUnitField(sb.unit, curField)
-			max = GetUnitField(sb.unit, maxField)
+			cur = LHT_SafeGetField(sb.unit, curField)
+			max = LHT_SafeGetField(sb.unit, maxField)
 		end
 		if cur and max then return cur, max end
 	end
@@ -80,18 +90,22 @@ local function LHT_IsOurs(textString)
 		or textString == LHT_PlayerHealthText or textString == LHT_PlayerManaText
 end
 
+-- Take ownership of a bar's TextString. Assertive: if the bar currently
+-- shows someone else's string (Blizzard's, or another addon that replaced
+-- it), adopt that string as the restore target and put ours on the bar.
+-- If the bar has no TextString yet (no target selected), do nothing;
+-- the delayed re-apply on target change picks it up.
 local function LHT_Replace(bar, owned)
-	if not bar then return end
+	if not bar or not owned then return end
+	local current = bar.TextString
+	if current == owned then return end
+	if not current then return end
 	if not LHT_Orig[bar] then
-		local current = bar.TextString
-		if not current or current == owned then return end
 		LHT_Orig[bar] = current
 	end
-	if bar.TextString == LHT_Orig[bar] then
-		bar.TextString = owned
-		LHT_Orig[bar]:Hide()
-		LHT_Orig[bar]:SetText("")
-	end
+	bar.TextString = owned
+	current:Hide()
+	current:SetText("")
 end
 
 local function LHT_Restore(bar)
@@ -186,11 +200,42 @@ local function LHT_Apply()
 	end
 end
 
+-- Delayed re-apply (0.2s). Other addons that also replace TextString run
+-- their handlers immediately on the same event; the delay lets this addon
+-- take the bars back after them, and catches the target bar once its
+-- TextString exists after a target is selected.
+local lhtTimer = CreateFrame("Frame")
+lhtTimer:Hide()
+local lhtDelay = 0
+lhtTimer:SetScript("OnUpdate", function()
+	lhtDelay = lhtDelay - arg1
+	if lhtDelay <= 0 then
+		lhtTimer:Hide()
+		LHT_Apply()
+	end
+end)
+local function LHT_ApplyDelayed()
+	lhtDelay = 0.2
+	lhtTimer:Show()
+end
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("VARIABLES_LOADED")
+frame:RegisterEvent("PLAYER_TARGET_CHANGED")
+frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:SetScript("OnEvent", function()
-	LHT_Setup()
-	LHT_Apply()
+	if event == "VARIABLES_LOADED" then
+		LHT_Setup()
+		LHT_Apply()
+		LHT_ApplyDelayed()
+		if LHT_UseNampower then
+			DEFAULT_CHAT_FRAME:AddMessage("LargeHealthText: Nampower detected, using direct reads")
+		else
+			DEFAULT_CHAT_FRAME:AddMessage("LargeHealthText: Nampower not found, using bar values")
+		end
+	else
+		LHT_ApplyDelayed()
+	end
 end)
 
 SLASH_LARGEHEALTHTEXT1 = "/lht"

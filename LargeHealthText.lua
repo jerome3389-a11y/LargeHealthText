@@ -1,28 +1,21 @@
--- LargeHealthText 2.8 - single function: target frame health/mana only.
--- Faithful copy of ShaguTweaks Real Health Numbers (user: learn from
--- SHAGU, stop inventing). Only two changes from ShaguTweaks:
--- (1) target bars only (no player/pet); (2) target health values from
--- MobInfo2 memory (max from PPP database, cur = live percent * max)
--- instead of libhealth, and format is "cur/max" instead of "cur - pct%".
--- Everything else (StatusTexts holder, global names, font loop,
--- lockShow = 42, hook structure, show/hide rules) is ShaguTweaks verbatim.
--- Setup runs on PLAYER_ENTERING_WORLD (after UI loads, like
--- ShaguTweaks module.enable), idempotent so a second run is harmless.
+-- LargeHealthText 2.9 - single function: target frame health/mana only.
+-- Faithful copy of ShaguTweaks Real Health Numbers. 2.8 deviated: it
+-- checked "if not TextString" before assigning, but ShaguTweaks assigns
+-- UNCONDITIONALLY (overwrites whatever is there). 2.9 removes that check.
+-- Idempotence is by "if TargetFrame.StatusTexts then return end", not by
+-- checking TextString. Setup, hook, lockShow, values (MobInfo2 memory),
+-- format "cur/max" otherwise match ShaguTweaks.
 
 local function LHT_Setup()
 	if not TargetFrame or not TargetFrameHealthBar or not TargetFrameManaBar then return end
-	if not TargetFrame.StatusTexts then
-		TargetFrame.StatusTexts = CreateFrame("Frame", nil, TargetFrame)
-		TargetFrame.StatusTexts:SetAllPoints(TargetFrame)
-	end
-	if not TargetFrameHealthBar.TextString then
-		TargetFrameHealthBar.TextString = TargetFrame.StatusTexts:CreateFontString("TargetFrameHealthBarText", "OVERLAY")
-		TargetFrameHealthBar.TextString:SetPoint("TOP", TargetFrameHealthBar, "BOTTOM", -2, 23)
-	end
-	if not TargetFrameManaBar.TextString then
-		TargetFrameManaBar.TextString = TargetFrame.StatusTexts:CreateFontString("TargetFrameManaBarText", "OVERLAY")
-		TargetFrameManaBar.TextString:SetPoint("TOP", TargetFrameManaBar, "BOTTOM", -2, 22)
-	end
+	if TargetFrame.StatusTexts then return end
+	TargetFrame.StatusTexts = CreateFrame("Frame", nil, TargetFrame)
+	TargetFrame.StatusTexts:SetAllPoints(TargetFrame)
+	-- assign unconditionally, like ShaguTweaks (no "if not TextString" check)
+	TargetFrameHealthBar.TextString = TargetFrame.StatusTexts:CreateFontString("TargetFrameHealthBarText", "OVERLAY")
+	TargetFrameHealthBar.TextString:SetPoint("TOP", TargetFrameHealthBar, "BOTTOM", -2, 23)
+	TargetFrameManaBar.TextString = TargetFrame.StatusTexts:CreateFontString("TargetFrameManaBarText", "OVERLAY")
+	TargetFrameManaBar.TextString:SetPoint("TOP", TargetFrameManaBar, "BOTTOM", -2, 22)
 	for _, frame in pairs({ TargetFrameHealthBar, TargetFrameManaBar }) do
 		frame.TextString:SetFontObject("GameFontWhite")
 		frame.TextString:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")

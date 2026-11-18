@@ -1,9 +1,18 @@
--- LargeHealthText 2.10 - single function: target frame health/mana only.
--- Faithful copy of ShaguTweaks Real Health Numbers. 2.9 omitted the TBC
--- hide line; 2.10 adds it back (with vanilla = true, so it is skipped in
--- vanilla exactly like ShaguTweaks). Otherwise identical to ShaguTweaks
--- except the three intended changes: target bars only (no player/pet),
--- values from MobInfo2 memory (not libhealth), format always "cur/max".
+-- LargeHealthText 2.11 - single function: target frame health/mana only.
+-- Self-analysis of 2.10 found two bugs (user: analyze, do not test):
+-- (1) Hook processes ALL bars, not just target. ShaguTweaks intends that
+--     (it shows numbers on player/pet/target), but user wants target
+--     ONLY. 2.10 overwrote the player bar text with "cur/max" too.
+--     FIX: return early unless sb is TargetFrameHealthBar/ManaBar.
+-- (2) Hook + setup installed IMMEDIATELY at file load (early), so the
+--     hook is INNER, not outermost. MobInfo2 loads after us (M > L) and
+--     installs its hook later, so its post-processing runs AFTER ours
+--     and can overwrite our text. ShaguTweaks installs in module.enable
+--     (after UI loads, late). FIX: install ONLY on PLAYER_ENTERING_WORLD
+--     (late), remove immediate calls. A /reload is needed if the addon
+--     is enabled mid-session.
+-- Otherwise identical to ShaguTweaks except target-only, MobInfo2
+-- memory values, format "cur/max".
 
 local vanilla = true
 
@@ -12,7 +21,6 @@ local function LHT_Setup()
 	if TargetFrame.StatusTexts then return end
 	TargetFrame.StatusTexts = CreateFrame("Frame", nil, TargetFrame)
 	TargetFrame.StatusTexts:SetAllPoints(TargetFrame)
-	-- assign unconditionally, like ShaguTweaks (no "if not TextString" check)
 	TargetFrameHealthBar.TextString = TargetFrame.StatusTexts:CreateFontString("TargetFrameHealthBarText", "OVERLAY")
 	TargetFrameHealthBar.TextString:SetPoint("TOP", TargetFrameHealthBar, "BOTTOM", -2, 23)
 	TargetFrameManaBar.TextString = TargetFrame.StatusTexts:CreateFontString("TargetFrameManaBarText", "OVERLAY")
@@ -32,6 +40,8 @@ local function LHT_InstallHook()
 	function TextStatusBar_UpdateTextString(sb)
 		if not sb then sb = this end
 		HookTextStatusBar_UpdateTextString(sb)
+		-- target bars ONLY (bug 1 fix: do not touch player/pet bars)
+		if sb ~= TargetFrameHealthBar and sb ~= TargetFrameManaBar then return end
 		local string = sb.TextString
 		if string and sb.unit then
 			-- hide tbc text string element (ShaguTweaks verbatim; skipped in vanilla)
@@ -72,12 +82,11 @@ local function LHT_InstallHook()
 	end
 end
 
+-- install ONLY on PLAYER_ENTERING_WORLD (late, outermost - bug 2 fix).
+-- No immediate calls: installing at file load makes the hook inner.
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:SetScript("OnEvent", function()
 	LHT_Setup()
 	LHT_InstallHook()
 end)
--- also try immediately in case the world is already entered
-LHT_Setup()
-LHT_InstallHook()

@@ -1,30 +1,40 @@
--- LargeHealthText 2.3 - single function: target frame health/mana only.
+-- LargeHealthText 2.4 - single function: target frame health/mana only.
 -- Turtle WoW: TargetFrameHealthBar.TextString is NIL even with a target
--- (confirmed by /run diagnostic 2026-11-18 22:09). 2.1 creates its own
--- FontString and assigns it when nil. 2.2 hid Blizzard's other strings.
--- 2.3 fixes the VALUE source (user correction 2026-11-18 22:18):
--- the value must NOT come from memory/database (not MobInfo2's PPP
--- memory, not Nampower's memory read). In Turtle WoW the server sends
--- real values, so UnitHealth/UnitHealthMax return the real cur/max
--- directly (e.g. 141/172, not percent). Use those. The bar's own
--- GetValue is percent-only (100 at full health) and is NOT used.
+-- (confirmed by /run diagnostic 2026-11-18 22:09). Creates its own
+-- FontString and assigns it when nil; hides Blizzard's other strings.
+-- VALUE source (user correction 2026-11-18 22:20, 2.3 was wrong):
+-- UnitHealth/UnitHealthMax return PERCENT (100 at full health), NOT real
+-- values, so 2.3 showed percent. MobInfo2's PPP memory/database is also
+-- wrong (stale percent gives wrong cur). The real cur/max come from
+-- Nampower's GetUnitField, which reads the unit's live health/maxHealth
+-- fields directly. Nampower first; bar percent only as last fallback.
 -- No large text, no player/pet, no toggle.
 
 local function LHT_GetTargetHealth()
-	-- Turtle WoW real values from the game API (not memory, not PPP)
-	local cur = UnitHealth("target")
-	local max = UnitHealthMax("target")
-	if cur and max and max > 0 then
-		return cur, max
+	-- Nampower: live real values from the unit fields
+	if type(GetUnitField) == "function" then
+		local ok, cur = pcall(GetUnitField, "target", "health")
+		local ok2, max = pcall(GetUnitField, "target", "maxHealth")
+		if ok and ok2 and cur and max and max > 0 then return cur, max end
+	end
+	if TargetFrameHealthBar then
+		local cur = TargetFrameHealthBar:GetValue()
+		local _, max = TargetFrameHealthBar:GetMinMaxValues()
+		return cur, max or 0
 	end
 	return 0, 0
 end
 
 local function LHT_GetTargetMana()
-	local cur = UnitPower("target")
-	local max = UnitPowerMax("target")
-	if cur and max and max > 0 then
-		return cur, max
+	if type(GetUnitField) == "function" then
+		local ok, cur = pcall(GetUnitField, "target", "power1")
+		local ok2, max = pcall(GetUnitField, "target", "maxPower1")
+		if ok and ok2 and cur and max and max > 0 then return cur, max end
+	end
+	if TargetFrameManaBar then
+		local cur = TargetFrameManaBar:GetValue()
+		local _, max = TargetFrameManaBar:GetMinMaxValues()
+		return cur, max or 0
 	end
 	return 0, 0
 end

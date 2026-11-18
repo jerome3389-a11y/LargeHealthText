@@ -1,15 +1,13 @@
--- LargeHealthText 2.6 - single function: target frame health/mana only.
--- KEY POINT from ShaguTweaks (user: find it in SHAGU, it is written
--- there directly): the system's own display disappears NOT by hiding
--- it, but by REPLACING bar.TextString with a new FontString that has
--- the GLOBAL name "TargetFrameHealthBarText" / "TargetFrameManaBarText",
--- parented to a holder Frame on TargetFrame (not to the bar itself).
--- In Turtle WoW bar.TextString is NIL, so Blizzard's text is shown via
--- that global-named string (or a separate element); creating our own
--- string with the same global name captures it. ShaguTweaks also sets
--- sb.lockShow = 42 and sb:Show() in the hook so the bar stays shown.
--- VALUE (user: needs memory): max from MobInfo2 PPP database
--- (MobHealth_GetTargetMaxHP), percent live from the bar, cur = pct*max/100.
+-- LargeHealthText 2.7 - single function: target frame health/mana only.
+-- 2.6 failed ("system still there, addon does not show"): setup ran at
+-- load time with a LHT_SetupDone flag that blocked re-run, so if
+-- TargetFrameHealthBar was not ready yet the strings were never created,
+-- and the hook never re-assigned them. 2.7 does LAZY setup inside the
+-- hook: on the first bar update (when the bar definitely exists) create
+-- the ShaguTweaks-style globally-named FontString on a holder frame and
+-- assign it to bar.TextString; re-assign on every update so it sticks
+-- even if the game resets TextString. Also sets lockShow = 42.
+-- VALUE: max from MobInfo2 PPP memory, percent live from the bar.
 -- No large text, no player/pet, no toggle.
 
 local function LHT_GetTargetHealth(sb)
@@ -54,34 +52,28 @@ local function LHT_GetTargetMana(sb)
 	return 0, 0
 end
 
--- ShaguTweaks-style setup: holder frame + globally-named strings
-local LHT_SetupDone = false
-local function LHT_Setup()
-	if LHT_SetupDone then return end
-	LHT_SetupDone = true
+-- owned strings (ShaguTweaks-style: global name, holder frame)
+local LHT_HealthText = nil
+local LHT_ManaText = nil
+local function LHT_EnsureStrings()
 	if not TargetFrame then return end
-	-- holder frame on TargetFrame (like ShaguTweaks StatusTexts)
 	if not TargetFrame.LHT_StatusTexts then
 		TargetFrame.LHT_StatusTexts = CreateFrame("Frame", nil, TargetFrame)
 		TargetFrame.LHT_StatusTexts:SetAllPoints(TargetFrame)
 	end
-	-- health: global name "TargetFrameHealthBarText", parented to holder
-	if TargetFrameHealthBar and not TargetFrameHealthBar.TextString then
-		TargetFrameHealthBar.TextString = TargetFrame.LHT_StatusTexts:CreateFontString("TargetFrameHealthBarText", "OVERLAY")
-		TargetFrameHealthBar.TextString:SetPoint("TOP", TargetFrameHealthBar, "BOTTOM", -2, 23)
+	if not LHT_HealthText and TargetFrameHealthBar then
+		LHT_HealthText = TargetFrame.LHT_StatusTexts:CreateFontString("TargetFrameHealthBarText", "OVERLAY")
+		LHT_HealthText:SetPoint("TOP", TargetFrameHealthBar, "BOTTOM", -2, 23)
+		LHT_HealthText:SetFontObject("GameFontWhite")
+		LHT_HealthText:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
+		LHT_HealthText:SetHeight(32)
 	end
-	-- mana: global name "TargetFrameManaBarText"
-	if TargetFrameManaBar and not TargetFrameManaBar.TextString then
-		TargetFrameManaBar.TextString = TargetFrame.LHT_StatusTexts:CreateFontString("TargetFrameManaBarText", "OVERLAY")
-		TargetFrameManaBar.TextString:SetPoint("TOP", TargetFrameManaBar, "BOTTOM", -2, 22)
-	end
-	-- font (ShaguTweaks: GameFontWhite + STANDARD_TEXT_FONT 10 OUTLINE, height 32)
-	for _, bar in ipairs({ TargetFrameHealthBar, TargetFrameManaBar }) do
-		if bar and bar.TextString then
-			bar.TextString:SetFontObject("GameFontWhite")
-			bar.TextString:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
-			bar.TextString:SetHeight(32)
-		end
+	if not LHT_ManaText and TargetFrameManaBar then
+		LHT_ManaText = TargetFrame.LHT_StatusTexts:CreateFontString("TargetFrameManaBarText", "OVERLAY")
+		LHT_ManaText:SetPoint("TOP", TargetFrameManaBar, "BOTTOM", -2, 22)
+		LHT_ManaText:SetFontObject("GameFontWhite")
+		LHT_ManaText:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
+		LHT_ManaText:SetHeight(32)
 	end
 end
 
@@ -93,28 +85,29 @@ local function LHT_InstallHook()
 	TextStatusBar_UpdateTextString = function(sb)
 		if not sb then sb = this end
 		OrigUpdate(sb)
-		local string = sb.TextString
-		if string and sb.unit then
-			-- ShaguTweaks: force the bar (and its text) to stay shown
-			sb.lockShow = 42
-			sb:Show()
-			if sb == TargetFrameHealthBar then
-				local cur, max = LHT_GetTargetHealth(sb)
-				if max and max > 0 then
-					string:SetText(cur .. "/" .. max)
-					string:Show()
-				else
-					string:SetText("")
-					string:Hide()
+		if sb == TargetFrameHealthBar or sb == TargetFrameManaBar then
+			-- lazy setup: bar definitely exists here
+			LHT_EnsureStrings()
+			local owned = (sb == TargetFrameHealthBar) and LHT_HealthText or LHT_ManaText
+			if owned then
+				-- re-assign every time so it sticks
+				if sb.TextString ~= owned then
+					sb.TextString = owned
 				end
-			elseif sb == TargetFrameManaBar then
-				local cur, max = LHT_GetTargetMana(sb)
-				if max and max > 0 then
-					string:SetText(cur .. "/" .. max)
-					string:Show()
+				sb.lockShow = 42
+				sb:Show()
+				local cur, max
+				if sb == TargetFrameHealthBar then
+					cur, max = LHT_GetTargetHealth(sb)
 				else
-					string:SetText("")
-					string:Hide()
+					cur, max = LHT_GetTargetMana(sb)
+				end
+				if max and max > 0 then
+					owned:SetText(cur .. "/" .. max)
+					owned:Show()
+				else
+					owned:SetText("")
+					owned:Hide()
 				end
 			end
 		end
@@ -124,8 +117,6 @@ end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:SetScript("OnEvent", function()
-	LHT_Setup()
 	LHT_InstallHook()
 end)
-LHT_Setup()
 LHT_InstallHook()

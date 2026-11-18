@@ -1,4 +1,4 @@
--- LargeHealthText 1.4
+-- LargeHealthText 1.5
 -- Large health numbers on player, pet and target unit frames.
 -- Extracted from ShaguTweaks "Real Health Numbers" (shagu/ShaguTweaks),
 -- standalone, no dependencies. Turtle WoW 1.18.1 / WoW 1.12.
@@ -8,13 +8,14 @@
 -- world; assertive Replace.
 -- 1.3: font set on this addon's OWN strings (fix "Font not set");
 -- nil-guard pet-bar font setup.
--- 1.4: FIX (a) turning /lht off left two health numbers: Restore put
--- Blizzard's text back but never hid this addon's own string, so both
--- showed. Restore now hides and clears the owned string.
--- FIX (b) target bar never changed: the game / another addon can reset
--- bar.TextString after Apply runs, so the hook now re-asserts ownership
--- on every bar update (if the bar's TextString is not ours, take it
--- back immediately), instead of relying only on event-time Apply.
+-- 1.4: Restore hides owned string (fix double numbers on off); hook
+-- re-asserts bar ownership on every update (fix target bar).
+-- 1.5: FIX the real deviation from ShaguTweaks. ShaguTweaks assigns the
+-- new font string to bar.TextString DIRECTLY, without checking whether
+-- the old one exists. My Replace returned early when bar.TextString
+-- was nil (no target yet), so the target bar was never given a string
+-- at all. Replace now assigns unconditionally like ShaguTweaks does;
+-- it only hides/clears the old string when one actually exists.
 
 if not LargeHealthTextDB then LargeHealthTextDB = { enabled = true } end
 
@@ -97,22 +98,23 @@ local function LHT_IsOurs(textString)
 		or textString == LHT_PlayerHealthText or textString == LHT_PlayerManaText
 end
 
--- Take ownership of a bar's TextString. Assertive: if the bar currently
--- shows someone else's string (Blizzard's, or another addon that replaced
--- it), adopt that string as the restore target and put ours on the bar.
--- If the bar has no TextString yet (no target selected), do nothing;
--- the delayed re-apply on target change picks it up.
+-- Take ownership of a bar's TextString. Faithful to ShaguTweaks: assign
+-- directly, without requiring the old string to exist first. The old
+-- string is saved for Restore only when one actually exists; when the
+-- bar has no TextString yet (no target selected) the assignment still
+-- happens, which is exactly what makes the target bar work.
 local function LHT_Replace(bar, owned)
 	if not bar or not owned then return end
 	local current = bar.TextString
 	if current == owned then return end
-	if not current then return end
-	if not LHT_Orig[bar] then
+	if current and not LHT_Orig[bar] then
 		LHT_Orig[bar] = current
 	end
 	bar.TextString = owned
-	current:Hide()
-	current:SetText("")
+	if current then
+		current:Hide()
+		current:SetText("")
+	end
 end
 
 local function LHT_Restore(bar)
@@ -126,13 +128,21 @@ local function LHT_Restore(bar)
 		owned:SetText("")
 		LHT_LastText[owned] = nil
 	end
-	if orig and bar.TextString ~= orig and not LHT_IsOurs(bar.TextString) then
-		-- someone else owns it now, leave it alone
-		return
-	end
-	if orig and bar.TextString ~= orig then
-		bar.TextString = orig
-		TextStatusBar_UpdateTextString(bar)
+	if orig then
+		if bar.TextString ~= orig and not LHT_IsOurs(bar.TextString) then
+			-- someone else owns it now, leave it alone
+			return
+		end
+		if bar.TextString ~= orig then
+			bar.TextString = orig
+			TextStatusBar_UpdateTextString(bar)
+		end
+	else
+		-- No original was ever saved (the bar had no TextString when
+		-- we took it); just detach ours from the bar.
+		if owned and bar.TextString == owned then
+			bar.TextString = nil
+		end
 	end
 end
 

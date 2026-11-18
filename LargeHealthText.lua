@@ -1,28 +1,22 @@
--- LargeHealthText 2.0 - single function: target frame health/mana only.
--- Shows the target's real health and mana as clean "cur/max" on the
--- target frame bars, with no overlapping Blizzard default text.
--- No large text, no player/pet bars, no toggle, no TextString swapping.
--- How it works: hooks TextStatusBar_UpdateTextString LATE (on
--- PLAYER_ENTERING_WORLD, after other addons have hooked), so this
--- addon's text is set last and wins. Values: MobInfo2's learned real
--- health (MobHealth_GetTargetCurHP/MaxHP) first, then Nampower direct
--- memory reads (GetUnitField), then the bar's own values.
--- Turtle WoW 1.18.1 / WoW 1.12.
+-- LargeHealthText 2.1 - single function: target frame health/mana only.
+-- Turtle WoW: TargetFrameHealthBar.TextString is NIL even with a target
+-- selected (confirmed by /run diagnostic 2026-11-18 22:09), so 2.0's
+-- "if string then set it" did nothing. 2.1 creates its own FontString
+-- and assigns it to bar.TextString when nil (ShaguTweaks approach),
+-- then writes "cur/max" on it. No large text, no player/pet, no toggle.
+-- Values: MobInfo2 learned real health first, then Nampower, then bar.
 
 local function LHT_GetTargetHealth()
-	-- MobInfo2 learned real values (same numbers as its "126/126 (100%)" line)
 	if type(MobHealth_GetTargetCurHP) == "function" and type(MobHealth_GetTargetMaxHP) == "function" then
 		local cur = MobHealth_GetTargetCurHP()
 		local max = MobHealth_GetTargetMaxHP()
 		if cur and max and max > 0 then return cur, max end
 	end
-	-- Nampower direct memory read
 	if type(GetUnitField) == "function" then
 		local ok, cur = pcall(GetUnitField, "target", "health")
 		local ok2, max = pcall(GetUnitField, "target", "maxHealth")
 		if ok and ok2 and cur and max and max > 0 then return cur, max end
 	end
-	-- bar values (percent-only for most mobs, but the only fallback)
 	if TargetFrameHealthBar then
 		local cur = TargetFrameHealthBar:GetValue()
 		local _, max = TargetFrameHealthBar:GetMinMaxValues()
@@ -45,6 +39,22 @@ local function LHT_GetTargetMana()
 	return 0, 0
 end
 
+-- owned strings, created once
+local LHT_HealthText = nil
+local LHT_ManaText = nil
+local function LHT_EnsureStrings()
+	if not LHT_HealthText and TargetFrameHealthBar then
+		LHT_HealthText = TargetFrameHealthBar:CreateFontString(nil, "OVERLAY")
+		LHT_HealthText:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
+		LHT_HealthText:SetPoint("CENTER", TargetFrameHealthBar, "CENTER", 0, 0)
+	end
+	if not LHT_ManaText and TargetFrameManaBar then
+		LHT_ManaText = TargetFrameManaBar:CreateFontString(nil, "OVERLAY")
+		LHT_ManaText:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
+		LHT_ManaText:SetPoint("CENTER", TargetFrameManaBar, "CENTER", 0, 0)
+	end
+end
+
 local LHT_Hooked = false
 local function LHT_InstallHook()
 	if LHT_Hooked then return end
@@ -53,30 +63,31 @@ local function LHT_InstallHook()
 	TextStatusBar_UpdateTextString = function(sb)
 		if not sb then sb = this end
 		OrigUpdate(sb)
-		-- only the target frame bars; player/pet untouched
-		if sb == TargetFrameHealthBar then
-			local string = sb.TextString
-			if string then
-				local cur, max = LHT_GetTargetHealth()
-				if max and max > 0 then
-					string:SetText(cur .. "/" .. max)
-					string:Show()
-				else
-					string:SetText("")
-					string:Hide()
-				end
+		LHT_EnsureStrings()
+		if sb == TargetFrameHealthBar and LHT_HealthText then
+			-- TextString is nil in Turtle WoW: assign ours
+			if sb.TextString ~= LHT_HealthText then
+				sb.TextString = LHT_HealthText
 			end
-		elseif sb == TargetFrameManaBar then
-			local string = sb.TextString
-			if string then
-				local cur, max = LHT_GetTargetMana()
-				if max and max > 0 then
-					string:SetText(cur .. "/" .. max)
-					string:Show()
-				else
-					string:SetText("")
-					string:Hide()
-				end
+			local cur, max = LHT_GetTargetHealth()
+			if max and max > 0 then
+				LHT_HealthText:SetText(cur .. "/" .. max)
+				LHT_HealthText:Show()
+			else
+				LHT_HealthText:SetText("")
+				LHT_HealthText:Hide()
+			end
+		elseif sb == TargetFrameManaBar and LHT_ManaText then
+			if sb.TextString ~= LHT_ManaText then
+				sb.TextString = LHT_ManaText
+			end
+			local cur, max = LHT_GetTargetMana()
+			if max and max > 0 then
+				LHT_ManaText:SetText(cur .. "/" .. max)
+				LHT_ManaText:Show()
+			else
+				LHT_ManaText:SetText("")
+				LHT_ManaText:Hide()
 			end
 		end
 	end
@@ -85,7 +96,8 @@ end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:SetScript("OnEvent", function()
+	LHT_EnsureStrings()
 	LHT_InstallHook()
 end)
--- also install immediately in case the world is already entered
+LHT_EnsureStrings()
 LHT_InstallHook()

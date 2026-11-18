@@ -1,39 +1,59 @@
--- LargeHealthText 2.4 - single function: target frame health/mana only.
+-- LargeHealthText 2.5 - single function: target frame health/mana only.
 -- Turtle WoW: TargetFrameHealthBar.TextString is NIL even with a target
 -- (confirmed by /run diagnostic 2026-11-18 22:09). Creates its own
 -- FontString and assigns it when nil; hides Blizzard's other strings.
--- VALUE source (user correction 2026-11-18 22:20, 2.3 was wrong):
--- UnitHealth/UnitHealthMax return PERCENT (100 at full health), NOT real
--- values, so 2.3 showed percent. MobInfo2's PPP memory/database is also
--- wrong (stale percent gives wrong cur). The real cur/max come from
--- Nampower's GetUnitField, which reads the unit's live health/maxHealth
--- fields directly. Nampower first; bar percent only as last fallback.
+-- VALUE (user correction 2026-11-18 22:21, two problems):
+-- (1) it NEEDS memory: the real max comes from MobInfo2's PPP database
+--     (MobHealth_GetTargetMaxHP). At full health the percent is 100, so
+--     without the learned max you cannot know the real value. 2.1 used
+--     MobHealth_GetTargetCurHP which used a STALE percent (100) and gave
+--     172/172 instead of 141/172. 2.5 takes max from the database but
+--     takes the percent LIVE from the bar itself (sb:GetValue, current
+--     after OrigUpdate), so cur = percent * max / 100 is correct.
+-- (2) Blizzard's own "82%" / "82" still shows: hide other FontStrings
+--     on the bar AND percent-like strings on TargetFrame.
 -- No large text, no player/pet, no toggle.
 
-local function LHT_GetTargetHealth()
-	-- Nampower: live real values from the unit fields
+local function LHT_GetTargetHealth(sb)
+	-- max from MobInfo2 memory (learned PPP database)
+	local max = nil
+	if type(MobHealth_GetTargetMaxHP) == "function" then
+		max = MobHealth_GetTargetMaxHP()
+	end
+	if max and max > 0 then
+		-- live percent from the bar (current, not stale)
+		local percent = nil
+		if sb and sb.GetValue then
+			percent = sb:GetValue()
+		elseif TargetFrameHealthBar then
+			percent = TargetFrameHealthBar:GetValue()
+		end
+		if not percent then
+			percent = UnitHealth("target")
+		end
+		if percent then
+			local cur = math.floor(percent * max / 100 + 0.5)
+			return cur, max
+		end
+	end
+	-- fallback: Nampower live fields
 	if type(GetUnitField) == "function" then
 		local ok, cur = pcall(GetUnitField, "target", "health")
-		local ok2, max = pcall(GetUnitField, "target", "maxHealth")
-		if ok and ok2 and cur and max and max > 0 then return cur, max end
-	end
-	if TargetFrameHealthBar then
-		local cur = TargetFrameHealthBar:GetValue()
-		local _, max = TargetFrameHealthBar:GetMinMaxValues()
-		return cur, max or 0
+		local ok2, m = pcall(GetUnitField, "target", "maxHealth")
+		if ok and ok2 and cur and m and m > 0 then return cur, m end
 	end
 	return 0, 0
 end
 
-local function LHT_GetTargetMana()
+local function LHT_GetTargetMana(sb)
 	if type(GetUnitField) == "function" then
 		local ok, cur = pcall(GetUnitField, "target", "power1")
 		local ok2, max = pcall(GetUnitField, "target", "maxPower1")
 		if ok and ok2 and cur and max and max > 0 then return cur, max end
 	end
-	if TargetFrameManaBar then
-		local cur = TargetFrameManaBar:GetValue()
-		local _, max = TargetFrameManaBar:GetMinMaxValues()
+	if sb and sb.GetValue then
+		local cur = sb:GetValue()
+		local _, max = sb:GetMinMaxValues()
 		return cur, max or 0
 	end
 	return 0, 0
@@ -65,6 +85,19 @@ local function LHT_HideOtherStrings(bar, keep)
 			r:Hide()
 		end
 	end
+	-- also hide percent-like strings on TargetFrame itself (e.g. "82%")
+	if TargetFrame and TargetFrame.GetRegions then
+		local fr = { TargetFrame:GetRegions() }
+		for _, r in ipairs(fr) do
+			if r and r ~= keep and r.GetObjectType and r:GetObjectType() == "FontString" and r.GetText then
+				local t = r:GetText()
+				if t and string.find(t, "%%") then
+					r:SetText("")
+					r:Hide()
+				end
+			end
+		end
+	end
 end
 
 local LHT_Hooked = false
@@ -81,7 +114,7 @@ local function LHT_InstallHook()
 				sb.TextString = LHT_HealthText
 			end
 			LHT_HideOtherStrings(sb, LHT_HealthText)
-			local cur, max = LHT_GetTargetHealth()
+			local cur, max = LHT_GetTargetHealth(sb)
 			if max and max > 0 then
 				LHT_HealthText:SetText(cur .. "/" .. max)
 				LHT_HealthText:Show()
@@ -94,7 +127,7 @@ local function LHT_InstallHook()
 				sb.TextString = LHT_ManaText
 			end
 			LHT_HideOtherStrings(sb, LHT_ManaText)
-			local cur, max = LHT_GetTargetMana()
+			local cur, max = LHT_GetTargetMana(sb)
 			if max and max > 0 then
 				LHT_ManaText:SetText(cur .. "/" .. max)
 				LHT_ManaText:Show()

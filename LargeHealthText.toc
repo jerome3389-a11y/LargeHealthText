@@ -1,7 +1,6 @@
 ## Interface: 11200
-## Title: Large Health Text
-## Notes: Large health numbers on player, pet and target frames. Extracted from ShaguTweaks Real Health Numbers.
+## Title: Target Health Mana
+## Notes: Shows the target's real health and mana as cur/max on the target frame, no overlap. Single function, target frame only.
 ## Author: roy
-## Version: 1.5
-## SavedVariables: LargeHealthTextDB
+## Version: 2.0
 LargeHealthText.lua

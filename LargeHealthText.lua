@@ -1,8 +1,12 @@
--- LargeHealthText 1.0
+-- LargeHealthText 1.1
 -- Large health numbers on player, pet and target unit frames.
 -- Extracted from ShaguTweaks "Real Health Numbers" (shagu/ShaguTweaks),
 -- standalone, no dependencies. Turtle WoW 1.18.1 / WoW 1.12.
 -- Toggle: /lht  (on/off, saved per character account in LargeHealthTextDB)
+-- 1.1: optional Nampower support. If the Nampower DLL is loaded,
+-- health/mana are read directly from memory via GetUnitField (fastest);
+-- otherwise the bar's own values are used (Turtle WoW already sends real
+-- values, so both paths agree). No DLL required; works with or without it.
 
 if not LargeHealthTextDB then LargeHealthTextDB = { enabled = true } end
 
@@ -16,6 +20,53 @@ local function LHT_Abbreviate(value)
 		return string.format("%.1fk", value / 1000)
 	else
 		return tostring(value)
+	end
+end
+
+-- Nampower (new DLL): direct memory reads via GetUnitField, fastest and
+-- most accurate. Detected once; if absent, fall back to the bar's values
+-- (which in Turtle WoW are already real values from the server).
+-- Field names verified against Nampower SCRIPTS.md / UNIT_FIELDS.md:
+-- health / maxHealth, power1..power5 / maxPower1..maxPower5.
+local LHT_UseNampower = (type(GetUnitField) == "function")
+
+-- power field for a unit's current power bar (UnitPowerType: 0 mana,
+-- 1 rage, 2 focus, 3 energy, 4 happiness)
+local function LHT_PowerFields(unit)
+	local ptype = UnitPowerType(unit)
+	if ptype == 1 then return "power2", "maxPower2"
+	elseif ptype == 2 then return "power3", "maxPower3"
+	elseif ptype == 3 then return "power4", "maxPower4"
+	elseif ptype == 4 then return "power5", "maxPower5"
+	else return "power1", "maxPower1" end
+end
+
+-- cur/max for a status bar. Prefers Nampower direct reads; falls back to
+-- the bar's own values when Nampower is absent or returns nil.
+local function LHT_GetBarValues(sb)
+	local cur, max
+	if LHT_UseNampower and sb.unit then
+		if strfind(sb:GetName(), "Health") then
+			cur = GetUnitField(sb.unit, "health")
+			max = GetUnitField(sb.unit, "maxHealth")
+		else
+			local curField, maxField = LHT_PowerFields(sb.unit)
+			cur = GetUnitField(sb.unit, curField)
+			max = GetUnitField(sb.unit, maxField)
+		end
+		if cur and max then return cur, max end
+	end
+	cur = sb:GetValue()
+	local _, maxVal = sb:GetMinMaxValues()
+	return cur, maxVal or 0
+end
+
+-- only SetText when the text changed (perf: avoids redundant font updates)
+local LHT_LastText = {}
+local function LHT_SetBarText(fontString, newText)
+	if LHT_LastText[fontString] ~= newText then
+		LHT_LastText[fontString] = newText
+		fontString:SetText(newText)
 	end
 end
 
@@ -94,25 +145,24 @@ local function LHT_Setup()
 			if string and sb.unit then
 				sb.lockShow = 42
 				sb:Show()
-				local min, max = sb:GetMinMaxValues()
-				local cur = sb:GetValue()
+				local cur, max = LHT_GetBarValues(sb)
 				local percent = max > 0 and math.floor(cur / max * 100) or 0
 				if cur == percent and strfind(sb:GetName(), "Health") then
-					string:SetText(percent .. "%")
+					LHT_SetBarText(string, percent .. "%")
 				elseif sb:GetName() == "TargetFrameHealthBar" and cur < max then
-					string:SetText(LHT_Abbreviate(cur) .. " - " .. percent .. "%")
+					LHT_SetBarText(string, LHT_Abbreviate(cur) .. " - " .. percent .. "%")
 				else
-					string:SetText(LHT_Abbreviate(cur))
+					LHT_SetBarText(string, LHT_Abbreviate(cur))
 				end
 				if max == 0 then
 					string:Hide()
-					string:SetText("")
+					LHT_SetBarText(string, "")
 				elseif sb.unit == "target" and UnitIsDead("target") then
 					string:Hide()
-					string:SetText("")
+					LHT_SetBarText(string, "")
 				elseif sb.unit == "target" and UnitIsGhost("target") then
 					string:Hide()
-					string:SetText("")
+					LHT_SetBarText(string, "")
 				else
 					string:Show()
 				end
